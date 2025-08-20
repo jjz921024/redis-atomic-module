@@ -1,0 +1,14 @@
+# We'll use defaults from the Google style, but with 4 columns indentation.
+BasedOnStyle: Google
+Language: Cpp
+IndentWidth: 4
+DerivePointerAlignment: false
+PointerAlignment: Right
+AccessModifierOffset: -4
+BreakBeforeBinaryOperators: All
+ColumnLimit: 120
+AllowShortBlocksOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortFunctionsOnASingleLine: true
+AllowShortIfStatementsOnASingleLine: true
+AllowShortLoopsOnASingleLine: true
