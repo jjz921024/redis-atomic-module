@@ -1,0 +1,134 @@
+// INCRBYEXT <key> <num> [EX/EXAT/PX/PXAT time | KEEPTTL] [nx | xx] [min minval] [MAX maxval] [nonegative]
+int IncrByExtRedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    RedisModule_AutoMemory(ctx);
+    if (argc < 3) {
+        return RedisModule_WrongArity(ctx);
+    }
+
+    // 解析incr num
+    long long incr = 0;
+    if (RedisModule_StringToLongLong(argv[2], &incr) != REDISMODULE_OK) {
+        RedisModule_ReplyWithError(ctx, ERRORMSG_NO_INT);
+        return REDISMODULE_OK;
+    }
+
+    // 解析过期时间
+    int expire_flag = MODULE_EXPIRE_NO_FLAG;
+    RedisModuleString *time_str = NULL;
+    if (parseExpireFlags(argv, argc, 3, &expire_flag, &time_str) != REDISMODULE_OK) {
+        RedisModule_ReplyWithError(ctx, ERRORMSG_SYNTAX);
+        return REDISMODULE_OK;
+    }
+
+    long long expire = 0;
+    if (expire_flag & (MODULE_EXPIRE_EX_FLAG | MODULE_EXPIRE_PX_FLAG)) {
+        if (RedisModule_StringToLongLong(time_str, &expire) != REDISMODULE_OK || expire <= 0) {
+            RedisModule_ReplyWithError(ctx, ERRORMSG_INVALID_EXPIRE_TIME);
+            return REDISMODULE_OK;
+        }
+    }
+
+    // 解析其他参数
+    int nx = 0, xx = 0, nonegative = 0;
+    long long min_val = LONG_MIN, max_val = LONG_MAX;
+    int min_flag = 0, max_flag = 0;
+    for (int i = 3; i < argc; i++) {
+        if (!mstringcasecmp(argv[i], "nx")) {
+            nx = 1;
+        } else if (!mstringcasecmp(argv[i], "xx")) {
+            xx = 1;
+        } else if (!mstringcasecmp(argv[i], "min")) {
+            if (i + 1 >= argc || RedisModule_StringToLongLong(argv[i + 1], &min_val) != REDISMODULE_OK) {
+                RedisModule_ReplyWithError(ctx, "ERR invalid param boundary");
+                return REDISMODULE_OK;
+            }
+            min_flag = 1;
+            i++;
+        } else if (!mstringcasecmp(argv[i], "max")) {
+            if (i + 1 >= argc || RedisModule_StringToLongLong(argv[i + 1], &max_val) != REDISMODULE_OK) {
+                RedisModule_ReplyWithError(ctx, "ERR invalid param boundary");
+                return REDISMODULE_OK;
+            }
+            max_flag = 1;
+            i++;
+        } else if (!mstringcasecmp(argv[i], "nonegative")) {
+            nonegative = 1;
+        } else if (!(mstringcasecmp(argv[i], "ex") && mstringcasecmp(argv[i], "exat") && mstringcasecmp(argv[i], "px")
+                     && mstringcasecmp(argv[i], "pxat") && mstringcasecmp(argv[i], "keepttl"))) {
+            continue;
+        } else {
+            RedisModule_ReplyWithError(ctx, ERRORMSG_SYNTAX);
+            return REDISMODULE_OK;
+        }
+    }
+
+    // 检查max和min
+    if (min_flag && max_flag && max_val < min_val) {
+        RedisModule_ReplyWithError(ctx, "ERR invalid param boundary");
+        return REDISMODULE_OK;
+    }
+
+    RedisModuleKey *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_WRITE);
+    int type = RedisModule_KeyType(key);
+    if (type != REDISMODULE_KEYTYPE_EMPTY && type != REDISMODULE_KEYTYPE_STRING) {
+        RedisModule_ReplyWithError(ctx, REDISMODULE_ERRORMSG_WRONGTYPE);
+        return REDISMODULE_OK;
+    } else if ((nx && type != REDISMODULE_KEYTYPE_EMPTY) || (xx && type == REDISMODULE_KEYTYPE_EMPTY)) {
+        RedisModule_ReplyWithNull(ctx);
+        return REDISMODULE_OK;
+    }
+
+    // 获取key对应的int值
+    long long old_val = 0;
+    if (type == REDISMODULE_KEYTYPE_EMPTY) {
+        old_val = 0;
+    } else {
+        size_t len;
+        char *str = RedisModule_StringDMA(key, &len, REDISMODULE_READ);
+        RedisModuleString *val = RedisModule_CreateString(ctx, str, len);
+        if (RedisModule_StringToLongLong(val, &old_val) != REDISMODULE_OK) {
+            RedisModule_ReplyWithError(ctx, ERRORMSG_NO_FLOAT);
+            return REDISMODULE_OK;
+        }
+    }
+
+    // check overflow
+    if ((incr < 0 && old_val < 0 && incr < (LLONG_MIN - old_val))
+        || (incr > 0 && old_val > 0 && incr > (LLONG_MAX - old_val)) || (max_flag && old_val + incr > max_val)
+        || (min_flag && old_val + incr < min_val)) {
+        RedisModule_ReplyWithError(ctx, "ERRORMSG_OVERFLOW");
+        return REDISMODULE_OK;
+    }
+
+    double new_val = old_val + incr;
+    if (nonegative && new_val < 0) new_val = 0;
+
+    RedisModuleString *new_str = RedisModule_CreateStringFromDouble(ctx, new_val);
+    RedisModule_StringSet(key, new_str);
+    RedisModule_Replicate(ctx, "SET", "ssc", argv[1], new_str, "KEEPTTL");
+
+    if (expire_flag & MODULE_EXPIRE_KEEPTTL_FLAG) {
+        return REDISMODULE_OK;
+    }
+
+    // 需要修改expire
+    if (expire_flag & MODULE_EXPIRE_NO_FLAG) {
+        expire = REDISMODULE_NO_EXPIRE;
+    } else {
+        if (expire_flag & MODULE_EXPIRE_EX_FLAG) {
+            expire *= 1000;
+        }
+        if (expire_flag & MODULE_EXPIRE_ABS_FLAG) {
+            expire -= RedisModule_Milliseconds();
+            if (expire < 0) {
+                expire = 0;
+            }
+        }
+    }
+
+    RedisModule_SetExpire(key, expire);
+    RedisModule_Replicate(ctx, "PEXPIREAT", "sl", argv[1], (expire + RedisModule_Milliseconds()));
+
+    RedisModule_ReplyWithDouble(ctx, new_val);
+    return REDISMODULE_OK;
+}

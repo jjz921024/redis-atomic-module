@@ -2,25 +2,29 @@ cmake_minimum_required (VERSION 3.16)
 
 project(atomic-module LANGUAGES C)
 
+option(ENABLE_ASAN "enable address sanitizer" OFF)
+option(ENABLE_TSAN "enable thread sanitizer" OFF)
+
 set(TARGET atomic-module)
 
 set(CMAKE_C_STANDARD 11)
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -W -Wall -std=c99 -march=native -O3")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -W -Wall -std=gnu99 -O2")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-strict-aliasing -Wno-typedef-redefinition -Wno-sign-compare -Wno-unused-parameter -Wno-unused-variable -Wno-stringop-truncation")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -ggdb") #-fstandalone-debug -gdwarf-4
 
-if(SANITIZER_MODE MATCHES "address")
-    set(CMAKE_BUILD_TYPE "DEBUG")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O0 -fsanitize=address -fno-omit-frame-pointer")
-elseif(SANITIZER_MODE MATCHES "undefined")
-    set(CMAKE_BUILD_TYPE "DEBUG")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O0 -fsanitize=undefined -fno-omit-frame-pointer")
-elseif(SANITIZER_MODE MATCHES "thread")
-    set(CMAKE_BUILD_TYPE "DEBUG")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O0 -fsanitize=thread -fno-omit-frame-pointer")
-endif(SANITIZER_MODE MATCHES "address")
+if(ENABLE_ASAN AND ENABLE_TSAN)
+    message(FATAL_ERROR "ASan and TSan cannot be used at the same time")
+endif()
 
-set(CMAKE_C_VISIBILITY_PRESET hidden)
+if(ENABLE_ASAN)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -fsanitize=leak")
+endif()
+if(ENABLE_TSAN)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=thread")
+endif()
+# valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes
+
+set(CMAKE_C_VISIBILITY_PRESET hidden) # -fvisibility=hidden
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 
 add_definitions(-DREDISMODULE_EXPERIMENTAL_API)
