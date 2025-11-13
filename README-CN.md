@@ -159,6 +159,7 @@ Redis Atomic Module 提供了一组原子性更强、语义更丰富的集合和
   - 与不带过期时间的相应命令保持相同。如：`HSETEX`语义与`HSET`相同,  `LPUSHEX`语义与`LPUSH`相同
 - **场景**：
   - 用于带过期时间的集合/队列写入, 避免异常场景下漏设过期时间
+  - 无KEEPTTL参数, hset会保持ttl, hsetex每次必须带ttl更新
 
 ---
 
