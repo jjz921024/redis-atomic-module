@@ -103,6 +103,7 @@ int popIfGenericCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
         RedisModule_ReplyWithNull(ctx);
         return REDISMODULE_OK;
     }
+    RedisModule_CloseKey(key);
 
     int is_left = mstringcasecmp(argv[0], "LPOPIF") == 0;
     const char *index = is_left ? "0" : "-1";
@@ -313,6 +314,7 @@ int zPopIfGenericCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc
         RedisModule_ReplyWithEmptyArray(ctx);
         return REDISMODULE_OK;
     }
+    RedisModule_CloseKey(key);
 
     const char *range_cmd = mstringcasecmp(argv[0], "ZPOPMAXIF") == 0 ? "ZREVRANGE" : "ZRANGE";
     RedisModuleCallReply *reply = RedisModule_Call(ctx, range_cmd, "sllc", argv[1], 0, 0, "WITHSCORES");
